@@ -1,0 +1,113 @@
+service: url-shorterner-${opt:stage}-${self:custom.version}
+
+custom:
+  customDomain:
+    domainName: "url.redb.ai"
+    basePath: ''
+    stage: ${opt:stage, self:provider.stage}
+    createRoute53Record: false
+  stage: ${opt:stage, self:provider.stage}
+  version: "0001"
+  names:
+    urlshortener: ${self:service}-urlshortener-data
+  output:
+    file: .serverless/output.json
+  capacities:
+    - table: DynamoDBTableUrlShortener
+      read:
+        minimum: 10
+        maximum: 120
+      write:
+        minimum: 10
+        maximum: 120
+
+frameworkVersion: ">=1.28.0 <2.0.0"
+
+plugins:
+  - serverless-deployment-bucket
+  - serverless-plugin-additional-stacks
+  - serverless-dynamodb-local
+  - serverless-offline
+  - serverless-domain-manager
+
+provider:
+  name: aws
+  runtime: go1.x
+  region: ${opt:region, 'us-west-2'}
+  accountId: '779089996899'
+  deploymentBucket:
+    name: url-shorterner-${opt:stage}-deployment-bucket-${self:custom.version}
+    serverSideEncryption: AES256
+  iamRoleStatements:
+    - Effect: "Allow"
+      Resource: "*"
+      Action:
+        - 'dynamodb:GetItem'
+        - "dynamodb:PutItem"
+          
+functions:
+  urlShorten:
+    handler: bin/url-shortener/shorten
+    events:
+      - http:
+          path: /shorten
+          method: post
+          cors:
+            origin: '*'
+            headers:
+              - Content-Type
+              - X-Amz-Date
+              - Authorization
+              - X-Api-Key
+              - X-Amz-Security-Token
+              - X-Amz-User-Agent
+            allowCredentials: false
+    environment:
+      URL_SHORTENER_TABLE_NAME: ${self:custom.names.urlshortener}
+  urlRedirect:
+    handler: bin/url-shortener/redirect
+    events:
+      - http:
+          path: /{short_url}
+          method: get
+          request:
+            parameters:
+              paths:
+                short_url: true
+          cors:
+            origin: '*'
+            headers:
+              - Content-Type
+              - X-Amz-Date
+              - Authorization
+              - X-Api-Key
+              - X-Amz-Security-Token
+              - X-Amz-User-Agent
+            allowCredentials: false
+    environment:
+      URL_SHORTENER_TABLE_NAME: ${self:custom.names.urlshortener}
+
+resources:
+  Resources:
+    DynamoDBTableUrlShortener:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:custom.names.urlshortener}
+        AttributeDefinitions:
+          - AttributeName: short_url
+            AttributeType: S
+        KeySchema:
+          - AttributeName: short_url
+            KeyType: HASH
+        ProvisionedThroughput:
+          ReadCapacityUnits: 5
+          WriteCapacityUnits: 5
+
+package:
+ exclude:
+   - node_modules/**
+   - '!node_modules/.cache'
+   - Gopkg.lock
+ include:
+   - bin/**/**
+   - bin/**/**/**
